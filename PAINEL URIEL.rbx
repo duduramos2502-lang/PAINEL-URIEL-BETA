@@ -1,11 +1,13 @@
-# Full Roblox Aimbot/Xit Panel for Xenos Executor
+# Full Roblox Aimbot/Xit Panel with Floating Menu
 # Features: FOV Invisible, ESP Box/Skeleton, Team Check, Aimbot Head/Body
 
 import os
 import sys
 import time
-import ctypes
+import struct
 import threading
+import ctypes
+import tkinter as tk
 from pynput import keyboard, mouse
 
 # Global settings
@@ -28,15 +30,21 @@ CAMERA_ADDR = None
 
 def get_game_process():
     """Get handle to Roblox process"""
-    processes = []
-    for pid in os.listdir("/proc"):
-        try:
-            name = open(f"/proc/{pid}/comm").read().strip()
-            if "Roblox" in name:
-                processes.append(int(pid))
-        except:
-            continue
-    return processes[0] if processes else None
+    try:
+        import psutil
+        for proc in psutil.process_iter(['pid', 'name']):
+            if "Roblox" in proc.info['name']:
+                return proc.info['pid']
+    except ImportError:
+        # Fallback for systems without psutil
+        for pid in os.listdir("/proc"):
+            try:
+                name = open(f"/proc/{pid}/comm").read().strip()
+                if "Roblox" in name:
+                    return int(pid)
+            except:
+                continue
+    return None
 
 def init_game_pointers():
     """Initialize memory addresses for game objects"""
@@ -45,24 +53,29 @@ def init_game_pointers():
     GAME_PROCESS_ID = get_game_process()
     if not GAME_PROCESS_ID:
         print("[ERROR] Could not find Roblox process!")
+        print("Make sure Roblox is running and Xenos Executor is attached.")
         exit(1)
     
-    # Get module base address (simplified)
-    modules = open(f"/proc/{GAME_PROCESS_ID}/maps").read().split('\n')
-    for mod in modules:
-        if "roblox" in mod.lower():
-            GAME_MODULE = int(mod.split()[0], 16)
-            break
+    try:
+        # Try to read process memory directly
+        with open(f"/proc/{GAME_PROCESS_ID}/maps", "r") as f:
+            for line in f:
+                if "libcoreclr.so" in line or "/roblox/" in line:
+                    GAME_MODULE = int(line.split()[0], 16)
+                    break
+    except:
+        print("[ERROR] Could not initialize game pointers!")
+        print("Try attaching Xenos Executor first.")
+        exit(1)
     
-    # Calculate player list and camera offsets (example values)
+    # Example offsets - replace with actual values
     PLAYER_LIST_ADDR = GAME_MODULE + 0x123456
     CAMERA_ADDR = GAME_MODULE + 0xABCDEF
 
 def read_memory(addr, size):
     """Read memory from game process"""
     try:
-        mem_file = f"/proc/{GAME_PROCESS_ID}/mem"
-        with open(mem_file, "rb") as f:
+        with open(f"/proc/{GAME_PROCESS_ID}/mem", "rb") as f:
             f.seek(addr)
             return f.read(size)
     except:
@@ -71,8 +84,7 @@ def read_memory(addr, size):
 def write_memory(addr, data):
     """Write memory to game process"""
     try:
-        mem_file = f"/proc/{GAME_PROCESS_ID}/mem"
-        with open(mem_file, "wb") as f:
+        with open(f"/proc/{GAME_PROCESS_ID}/mem", "wb") as f:
             f.seek(addr)
             f.write(data)
     except:
@@ -85,7 +97,6 @@ def update_settings():
         write_memory(CAMERA_ADDR + 0x10, b"\x90\x90\x90\x90\x90\x90")
     
     if settings["esp_box"]:
-        # Enable box ESP
         write_memory(GAME_MODULE + 0x1234, b"\x01")
     else:
         write_memory(GAME_MODULE + 0x1234, b"\x00")
@@ -107,9 +118,9 @@ def aimbot_logic():
             
             # Iterate through players (simplified)
             for i in range(0, len(player_data), 0x20):
-                pos_x = ctypes.c_float.from_buffer_copy(player_data[i:i+4]).value
-                pos_y = ctypes.c_float.from_buffer_copy(player_data[i+4:i+8]).value
-                pos_z = ctypes.c_float.from_buffer_copy(player_data[i+8:i+12]).value
+                pos_x = struct.unpack("<f", player_data[i:i+4])[0]
+                pos_y = struct.unpack("<f", player_data[i+4:i+8])[0]
+                pos_z = struct.unpack("<f", player_data[i+8:i+12])[0]
                 
                 # Calculate distance
                 dist = ((pos_x - 0)**2 + (pos_y - 0)**2 + (pos_z - 0)**2)**0.5
@@ -136,6 +147,79 @@ def aimbot_logic():
             
         time.sleep(0.05)
 
+def create_menu():
+    """Create floating menu window"""
+    menu = tk.Tk()
+    menu.overrideredirect(True)  # Remove window decorations
+    menu.attributes("-topmost", True)  # Always stay on top
+    
+    # Set initial position near cursor
+    menu.geometry("+%d+%d" % (mouse.Controller().position[0], mouse.Controller().position[1]))
+    
+    # Create menu widgets
+    tk.Label(menu, text="ROBLOX XIT PANEL", font=("Arial", 12, "bold")).pack(pady=5)
+    
+    # Toggle buttons
+    def toggle_aimbot():
+        settings["aimbot_enabled"] = not settings["aimbot_enabled"]
+        aimbot_btn.config(text=f"Aimbot: {'ON' if settings['aimbot_enabled'] else 'OFF'}")
+        
+    def toggle_target():
+        settings["aim_target"] = "head" if settings["aim_target"] == "body" else "body"
+        target_btn.config(text=f"Target: {settings['aim_target'].upper()}")
+        
+    def toggle_fov():
+        settings["fov_invisible"] = not settings["fov_invisible"]
+        fov_btn.config(text=f"FOV Invisible: {'ON' if settings['fov_invisible'] else 'OFF'}")
+        
+    def toggle_esp():
+        settings["esp_box"] = not settings["esp_box"]
+        esp_btn.config(text=f"ESP Box: {'ON' if settings['esp_box'] else 'OFF'}")
+        
+    def toggle_team():
+        settings["team_check"] = not settings["team_check"]
+        team_btn.config(text=f"Team Check: {'ON' if settings['team_check'] else 'OFF'}")
+        
+    def toggle_regular():
+        settings["regular_fov"] = not settings["regular_fov"]
+        regular_btn.config(text=f"Regular FOV: {'ON' if settings['regular_fov'] else 'OFF'}")
+    
+    # Create buttons
+    aimbot_btn = tk.Button(menu, text=f"Aimbot: {'ON' if settings['aimbot_enabled'] else 'OFF'}", 
+                          command=toggle_aimbot, width=20)
+    aimbot_btn.pack(pady=2)
+    
+    target_btn = tk.Button(menu, text=f"Target: {settings['aim_target'].upper()}", 
+                          command=toggle_target, width=20)
+    target_btn.pack(pady=2)
+    
+    fov_btn = tk.Button(menu, text=f"FOV Invisible: {'ON' if settings['fov_invisible'] else 'OFF'}", 
+                       command=toggle_fov, width=20)
+    fov_btn.pack(pady=2)
+    
+    esp_btn = tk.Button(menu, text=f"ESP Box: {'ON' if settings['esp_box'] else 'OFF'}", 
+                       command=toggle_esp, width=20)
+    esp_btn.pack(pady=2)
+    
+    team_btn = tk.Button(menu, text=f"Team Check: {'ON' if settings['team_check'] else 'OFF'}", 
+                        command=toggle_team, width=20)
+    team_btn.pack(pady=2)
+    
+    regular_btn = tk.Button(menu, text=f"Regular FOV: {'ON' if settings['regular_fov'] else 'OFF'}", 
+                           command=toggle_regular, width=20)
+    regular_btn.pack(pady=2)
+    
+    # Close button
+    close_btn = tk.Button(menu, text="Close", command=menu.destroy, width=20)
+    close_btn.pack(pady=5)
+    
+    return menu
+
+def show_menu():
+    """Show floating menu when needed"""
+    menu = create_menu()
+    menu.mainloop()
+
 def main():
     """Main application entry point"""
     init_game_pointers()
@@ -145,37 +229,24 @@ def main():
     aimbot_thread = threading.Thread(target=aimbot_logic, daemon=True)
     aimbot_thread.start()
     
-    # Keyboard handler
+    # Show menu on startup
+    show_menu()
+    
+    print("ROBLOX XIT PANEL ACTIVE")
+    print("Press F1 to show/hide menu")
+    print("ESC to exit")
+    
+    # Keyboard handler for showing menu
     def on_press(key):
         if key == keyboard.Key.f1:
-            settings["enabled"] = not settings["enabled"]
-        elif key == keyboard.Key.f2:
-            settings["aimbot_enabled"] = not settings["aimbot_enabled"]
-        elif key == keyboard.Key.f3:
-            settings["aim_target"] = "head" if settings["aim_target"] == "body" else "body"
+            show_menu()
         elif key == keyboard.Key.esc:
             settings["enabled"] = False
             return False
             
-    # Mouse handler
-    def on_click(x, y, button, pressed):
-        if pressed and button == mouse.Button.left:
-            # Right-click to cycle targets
-            settings["aim_target"] = "head" if settings["aim_target"] == "body" else "body"
-            
-    # Start listeners
+    # Start keyboard listener
     kb_listener = keyboard.Listener(on_press=on_press)
-    mouse_listener = mouse.Listener(on_click=on_click)
-    
     kb_listener.start()
-    mouse_listener.start()
-    
-    print("ROBLOX XIT PANEL ACTIVE")
-    print("F1: Toggle Enabled")
-    print("F2: Toggle Aimbot")
-    print("F3: Cycle Target (Head/Body)")
-    print("Right Click: Cycle Target")
-    print("ESC: Exit")
     
     # Keep main thread alive
     try:
@@ -185,7 +256,6 @@ def main():
         pass
         
     kb_listener.stop()
-    mouse_listener.stop()
 
 if __name__ == "__main__":
     main()
