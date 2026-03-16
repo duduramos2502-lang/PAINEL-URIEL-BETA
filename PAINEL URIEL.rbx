@@ -1,4 +1,4 @@
-# Full Roblox Aimbot/Xit Panel with Floating Menu
+# Fixed Roblox Aimbot/Xit Panel with Floating Menu
 # Features: FOV Invisible, ESP Box/Skeleton, Team Check, Aimbot Head/Body
 
 import os
@@ -217,8 +217,11 @@ def create_menu():
 
 def show_menu():
     """Show floating menu when needed"""
-    menu = create_menu()
-    menu.mainloop()
+    try:
+        menu = create_menu()
+        menu.mainloop()
+    except Exception as e:
+        print(f"[ERROR] Menu error: {e}")
 
 def main():
     """Main application entry point"""
@@ -228,9 +231,6 @@ def main():
     # Start aimbot thread
     aimbot_thread = threading.Thread(target=aimbot_logic, daemon=True)
     aimbot_thread.start()
-    
-    # Show menu on startup
-    show_menu()
     
     print("ROBLOX XIT PANEL ACTIVE")
     print("Press F1 to show/hide menu")
